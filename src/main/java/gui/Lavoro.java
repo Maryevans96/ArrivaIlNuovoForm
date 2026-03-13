@@ -23,7 +23,7 @@ public class Lavoro extends JFrame {
     private JTextField numeroOdsField, dataOdsField, scadenzaOdsField, viaField,
             danneggianteField, descrizioneInterventoField, inizioLavoriField, fineLavoriField;
 
-    private JButton scaricaButton, compilaButton, caricaExcelButton, prossimoButton, pulisciCampiButton;
+    private JButton scaricaButton, compilaButton, caricaExcelButton, prossimoButton, precedenteButton, pulisciCampiButton;
     private JLabel infoExcelLabel;
 
     private List<Allegati> listaDatiExcel = new ArrayList<>();
@@ -43,14 +43,19 @@ public class Lavoro extends JFrame {
         topPanel.setBorder(BorderFactory.createTitledBorder("Gestione Excel"));
 
         caricaExcelButton = new JButton("Carica Excel");
-        prossimoButton = new JButton("Prossimo ODS >>");
+        precedenteButton = new JButton("<< Precedente");
+        prossimoButton = new JButton("Prossimo >>");
+
+        precedenteButton.setEnabled(false);
         prossimoButton.setEnabled(false);
         infoExcelLabel = new JLabel("Nessun file caricato");
 
         caricaExcelButton.addActionListener(e -> importaExcel());
         prossimoButton.addActionListener(e -> mostraProssimoDato());
+        precedenteButton.addActionListener(e -> mostraDatoPrecedente());
 
         topPanel.add(caricaExcelButton);
+        topPanel.add(precedenteButton);
         topPanel.add(prossimoButton);
         topPanel.add(infoExcelLabel);
         contentPane.add(topPanel, BorderLayout.NORTH);
@@ -84,17 +89,13 @@ public class Lavoro extends JFrame {
 
         // --- Pannello Inferiore: Bottoni Azione ---
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 10));
-
         compilaButton = new JButton("Compila PDF");
         compilaButton.addActionListener(e -> compilePdf());
-
         scaricaButton = new JButton("Salva PDF Compilato");
         scaricaButton.setEnabled(false);
         scaricaButton.addActionListener(e -> downloadPdf());
-
         pulisciCampiButton = new JButton("Pulisci Campi");
         pulisciCampiButton.addActionListener(e -> clearFields());
-
         JButton esciButton = new JButton("Esci");
         esciButton.addActionListener(e -> System.exit(0));
 
@@ -115,8 +116,11 @@ public class Lavoro extends JFrame {
     }
 
     private void importaExcel() {
-        JFileChooser fileChooser = new JFileChooser();
+        String desktopPath = System.getProperty("user.home") + File.separator + "Desktop";
+        JFileChooser fileChooser = new JFileChooser(desktopPath);
         fileChooser.setDialogTitle("Seleziona il file Excel");
+        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("File Excel (.xlsx)", "xlsx"));
+
         if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             File file = fileChooser.getSelectedFile();
             try (FileInputStream fis = new FileInputStream(file);
@@ -128,26 +132,36 @@ public class Lavoro extends JFrame {
 
                 for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                     Row row = sheet.getRow(i);
-                    if (row == null || row.getCell(0) == null) continue; // Salta righe vuote
+                    // Controllo: se la riga è nulla o la cella C (Numero) è vuota, salta
+                    if (row == null || row.getCell(2, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL) == null) continue;
 
-                    // 1. Gestione specifica Descrizione (Colonna H / indice 7) + Note (Colonna M / indice 12)
-                    String descrizioneBase = formatter.formatCellValue(row.getCell(7));
-                    String note = formatter.formatCellValue(row.getCell(12));
+                    String descrizioneBase = formatter.formatCellValue(row.getCell(7, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK));
+                    String note = formatter.formatCellValue(row.getCell(12, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK));
                     String descrizioneCompleta = descrizioneBase;
                     if (note != null && !note.trim().isEmpty()) {
                         descrizioneCompleta += " - " + note;
                     }
 
-                    // 2. Creazione oggetto con mappatura precisa
+                    Date dOds = getCellValueAsDate(row.getCell(3));
+                    Date dInizio, dFine;
+
+                    if (note != null && note.toUpperCase().contains("PRONTO INTERVENTO")) {
+                        dInizio = dOds;
+                        dFine = dOds;
+                    } else {
+                        dInizio = getCellValueAsDate(row.getCell(10));
+                        dFine = getCellValueAsDate(row.getCell(11));
+                    }
+
                     Allegati dati = new Allegati(
-                            formatter.formatCellValue(row.getCell(2)),  // Numero ODS (Colonna C)
-                            getCellValueAsDate(row.getCell(3)),        // Data ODS (Colonna D)
-                            getCellValueAsDate(row.getCell(4)),        // Scadenza ODS (Colonna E)
-                            formatter.formatCellValue(row.getCell(5)),  // Via (Colonna F)
-                            formatter.formatCellValue(row.getCell(6)),  // Danneggiante (Colonna G)
-                            descrizioneCompleta,                        // Descrizione + Note
-                            getCellValueAsDate(row.getCell(10)),       // Inizio Lavori (Colonna K)
-                            getCellValueAsDate(row.getCell(11))        // Fine Lavori (Colonna L)
+                            formatter.formatCellValue(row.getCell(2)),  // Numero ODS (C)
+                            dOds,                                       // Data ODS (D)
+                            getCellValueAsDate(row.getCell(4)),         // Scadenza (E)
+                            formatter.formatCellValue(row.getCell(5)),  // Via (F)
+                            formatter.formatCellValue(row.getCell(6)),  // Danneggiante (G)
+                            descrizioneCompleta,                        // Descrizione (H+M)
+                            dInizio,                                    // Inizio (K o D)
+                            dFine                                       // Fine (L o D)
                     );
 
                     listaDatiExcel.add(dati);
@@ -156,8 +170,7 @@ public class Lavoro extends JFrame {
                 if (!listaDatiExcel.isEmpty()) {
                     indiceCorrente = 0;
                     popolaCampi(listaDatiExcel.get(0));
-                    prossimoButton.setEnabled(listaDatiExcel.size() > 1);
-                    infoExcelLabel.setText("Riga 1 di " + listaDatiExcel.size());
+                    aggiornaStatoBottoni();
                 }
 
             } catch (Exception ex) {
@@ -168,24 +181,49 @@ public class Lavoro extends JFrame {
     }
 
     private Date getCellValueAsDate(Cell cell) {
-        if (cell == null) return null;
-        try {
-            return cell.getDateCellValue();
-        } catch (Exception e) {
-            return null;
+        if (cell == null || cell.getCellType() == CellType.BLANK) return null;
+
+        // 1. Prova se è un formato data numerico (standard Excel)
+        if (cell.getCellType() == CellType.NUMERIC) {
+            if (DateUtil.isCellDateFormatted(cell)) {
+                return cell.getDateCellValue();
+            }
         }
+
+        // 2. Prova se è una stringa (testo scritto gg/mm/aaaa)
+        if (cell.getCellType() == CellType.STRING) {
+            String val = cell.getStringCellValue().trim();
+            if (!val.isEmpty()) {
+                try {
+                    return sdf.parse(val);
+                } catch (ParseException e) {
+                    System.err.println("Errore conversione stringa in data: " + val);
+                }
+            }
+        }
+        return null;
     }
 
     private void mostraProssimoDato() {
         if (indiceCorrente < listaDatiExcel.size() - 1) {
             indiceCorrente++;
             popolaCampi(listaDatiExcel.get(indiceCorrente));
-            infoExcelLabel.setText("Riga " + (indiceCorrente + 1) + " di " + listaDatiExcel.size());
-
-            if (indiceCorrente == listaDatiExcel.size() - 1) {
-                prossimoButton.setEnabled(false);
-            }
+            aggiornaStatoBottoni();
         }
+    }
+
+    private void mostraDatoPrecedente() {
+        if (indiceCorrente > 0) {
+            indiceCorrente--;
+            popolaCampi(listaDatiExcel.get(indiceCorrente));
+            aggiornaStatoBottoni();
+        }
+    }
+
+    private void aggiornaStatoBottoni() {
+        precedenteButton.setEnabled(indiceCorrente > 0);
+        prossimoButton.setEnabled(indiceCorrente < listaDatiExcel.size() - 1);
+        infoExcelLabel.setText("Riga " + (indiceCorrente + 1) + " di " + listaDatiExcel.size());
     }
 
     private void popolaCampi(Allegati a) {
@@ -198,7 +236,6 @@ public class Lavoro extends JFrame {
         inizioLavoriField.setText(a.getInizioLavori() != null ? sdf.format(a.getInizioLavori()) : "");
         fineLavoriField.setText(a.getFineLavori() != null ? sdf.format(a.getFineLavori()) : "");
 
-        // Reset tasto scarica quando cambiano i dati
         scaricaButton.setEnabled(false);
         lastCompiledFilePath = null;
     }
@@ -227,30 +264,24 @@ public class Lavoro extends JFrame {
 
             JOptionPane.showMessageDialog(this, "PDF generato correttamente!", "Successo", JOptionPane.INFORMATION_MESSAGE);
 
-        } catch (ParseException ex) {
-            JOptionPane.showMessageDialog(this, "Errore formato data. Usa gg/mm/aaaa.", "Errore", JOptionPane.ERROR_MESSAGE);
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "Errore I/O: " + ex.getMessage(), "Errore", JOptionPane.ERROR_MESSAGE);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Errore nella generazione: " + ex.getMessage(), "Errore", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private void downloadPdf() {
         if (lastCompiledFilePath == null) return;
-
-        JFileChooser fileChooser = new JFileChooser();
+        JFileChooser fileChooser = new JFileChooser(System.getProperty("user.home") + File.separator + "Desktop");
         String defaultName = numeroOdsField.getText().replaceAll("[^a-zA-Z0-9.-]", "_") + ".pdf";
         fileChooser.setSelectedFile(new File(defaultName));
-
         if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
             try {
-                java.nio.file.Files.copy(
-                        new File(lastCompiledFilePath).toPath(),
+                java.nio.file.Files.copy(new File(lastCompiledFilePath).toPath(),
                         fileChooser.getSelectedFile().toPath(),
-                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
-                );
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 JOptionPane.showMessageDialog(this, "File salvato con successo!");
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "Errore durante il salvataggio: " + e.getMessage(), "Errore", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Errore salvataggio: " + e.getMessage());
             }
         }
     }
@@ -261,14 +292,9 @@ public class Lavoro extends JFrame {
     }
 
     private void clearFields() {
-        numeroOdsField.setText("");
-        dataOdsField.setText("");
-        scadenzaOdsField.setText("");
-        viaField.setText("");
-        danneggianteField.setText("");
-        descrizioneInterventoField.setText("");
-        inizioLavoriField.setText("");
-        fineLavoriField.setText("");
+        numeroOdsField.setText(""); dataOdsField.setText(""); scadenzaOdsField.setText("");
+        viaField.setText(""); danneggianteField.setText(""); descrizioneInterventoField.setText("");
+        inizioLavoriField.setText(""); fineLavoriField.setText("");
         scaricaButton.setEnabled(false);
         lastCompiledFilePath = null;
     }
