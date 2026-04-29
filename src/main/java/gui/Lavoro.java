@@ -315,15 +315,43 @@ public class Lavoro extends JFrame {
     }
 
     private void downloadPdf() {
-        JFileChooser saver = new JFileChooser(System.getProperty("user.home") + File.separator + "Desktop");
-        // Pulizia nome file da caratteri vietati
-        String safeName = numeroOdsField.getText().replaceAll("[\\\\/:*?\"<>|]", "_");
-        saver.setSelectedFile(new File(safeName + ".pdf"));
-        if (saver.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                java.nio.file.Files.copy(new File(lastCompiledFilePath).toPath(), saver.getSelectedFile().toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                JOptionPane.showMessageDialog(this, "Salvato con successo!");
-            } catch (IOException e) { JOptionPane.showMessageDialog(this, "Errore nel salvataggio."); }
+        if (lastCompiledFilePath == null) {
+            JOptionPane.showMessageDialog(this, "Nessun PDF generato da salvare.");
+            return;
+        }
+
+        // 1. Ottieni il percorso del Desktop
+        String desktopPath = System.getProperty("user.home") + File.separator + "Desktop";
+
+        // 2. Pulisci il nome del file dai caratteri vietati (es. ODS 123/A -> ODS 123_A)
+        String numeroOds = numeroOdsField.getText().trim().isEmpty() ? "Documento" : numeroOdsField.getText();
+        String safeName = numeroOds.replaceAll("[\\\\/:*?\"<>|]", "_");
+
+        // 3. Crea il file di destinazione finale
+        File destinazione = new File(desktopPath + File.separator + safeName + ".pdf");
+
+        try {
+            // Controllo se il file esiste già per non sovrascrivere senza avvisare (opzionale)
+            if (destinazione.exists()) {
+                int response = JOptionPane.showConfirmDialog(this,
+                        "Il file " + safeName + ".pdf esiste già sul desktop. Sovrascrivere?",
+                        "Conferma sovrascrittura",
+                        JOptionPane.YES_NO_OPTION);
+                if (response != JOptionPane.YES_OPTION) return;
+            }
+
+            // 4. Copia effettiva del file dal percorso temporaneo al desktop
+            java.nio.file.Files.copy(
+                    new File(lastCompiledFilePath).toPath(),
+                    destinazione.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            );
+
+            JOptionPane.showMessageDialog(this, "File salvato correttamente sul Desktop:\n" + destinazione.getName());
+
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Errore durante il salvataggio automatico: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
